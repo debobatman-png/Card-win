@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Card Duel</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://sad.adsgram.ai/js/sad.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700;800&display=swap" rel="stylesheet">
 <style>
 :root{--felt:#0f3d3e;--felt-dark:#0a2a2b;--ivory:#f5efe0;--ink:#1d1d1b;--coral:#e4572e;--gold:#f2b84b;--win:#3fb27f;--lose:#d64545}
@@ -61,12 +62,10 @@ main{flex:1;padding:8px 16px 16px;display:flex;flex-direction:column}
 </head>
 <body>
 <div id="app">
-  <!-- AD SLOT 1: top banner -->
-  <div class="ad-slot" id="ad-top">Ad space (top)</div>
 
   <header>
     <div class="stat"><b id="pts">0</b><span>Your points</span></div>
-    <div class="stat"><b id="free">3</b><span>Free games left</span></div>
+    <div class="stat"><b id="free">3</b><span>Games left</span></div>
     <button id="mute" aria-label="Mute">🔊</button>
   </header>
 
@@ -74,7 +73,7 @@ main{flex:1;padding:8px 16px 16px;display:flex;flex-direction:column}
     <section class="screen on" id="home">
       <div class="hello" id="hello"></div>
       <h1>Card<br>Duel</h1>
-      <p>Draw 3 cards. If one matches the computer's card, you win the round. Win 5 out of 9 rounds to win the game.</p>
+      <p>Draw 3 cards. If one matches the computer's card, you win the round. Win 3 out of 5 rounds to win the game.</p>
       <button class="btn" id="startBtn">Start Game</button>
       <div class="note" id="homeNote"></div>
       <button class="btn alt" id="adBtn" style="display:none;font-size:16px;padding:11px 22px">Watch an ad to play again</button>
@@ -99,12 +98,9 @@ main{flex:1;padding:8px 16px 16px;display:flex;flex-direction:column}
       <div class="note" id="endNote"></div>
     </section>
   </main>
-
-  <!-- AD SLOT 2: bottom banner -->
-  <div class="ad-slot" id="ad-bottom">Ad space (bottom)</div>
 </div>
 
-<!-- AD SLOT 3: rewarded ad -->
+<!-- Demo ad: only used when the Adsgram SDK is unavailable (testing outside Telegram) -->
 <div id="adModal"><div class="adbox">
   <b>Advertisement</b>
   <div class="ph" id="adContent">Ad content here</div>
@@ -115,39 +111,58 @@ main{flex:1;padding:8px 16px 16px;display:flex;flex-direction:column}
 <script>
 /* ============ SETTINGS ============ */
 const CONFIG = {
-  FREE_GAMES: 999,
-  AD_COOLDOWN_MS: 60*60*1000,   // 1 ad per hour
-  AD_SECONDS: 5,
-  ROUNDS: 9, WIN_NEEDED: 5,
-  PTS_ROUND_WIN: 5, PTS_ROUND_LOSS: 2, PTS_MATCH_BONUS: 50,
-  MUSIC_URL: "https://res.cloudinary.com/yyfutxow/video/upload/v1792959904/your_love.mp3",       // <<< PUT YOUR SONG FILE/URL HERE
-  SERVER_URL: ""                // optional: your server endpoint to save scores
+  MUSIC_URL: "https://res.cloudinary.com/yyfutxow/video/upload/v1792959904/your_love.mp3",       // <<< PUT YOUR SONG FILE/URL HERE (inside the public folder)
+  API_BASE: "",                 // "" = same server that serves this page
+  /* >>> ADSGRAM: your Interstitial block id (format "int-XXXXX"). "int-0000" is a placeholder <<< */
+  ADSGRAM_BLOCK_ID: "int-56214",
+  ADSGRAM_DEBUG: false,          // test ads. Set to false before going live!
+  AD_SECONDS: 15                 // length of the demo ad (only used when the Adsgram SDK is missing)
 };
 
 /* ============ TELEGRAM ============ */
 const tg = window.Telegram && Telegram.WebApp;
-let user = {id:"local", name:"Player"};
+let user = {name:"Player"};
 try{
   if (tg){ tg.ready(); tg.expand();
     const u = tg.initDataUnsafe && tg.initDataUnsafe.user;
-    if (u) user = {id:String(u.id), name:u.first_name}; }
+    if (u) user = {name:u.first_name}; }
 }catch(e){}
 const haptic = t => { try{ tg.HapticFeedback.notificationOccurred(t); }catch(e){} };
 const $ = id => document.getElementById(id);
 $('hello').textContent = "Welcome, " + user.name;
 
-/* ============ STORAGE ============ */
-const KEY = "carddual_" + user.id;
-let S = {points:0, freeLeft:CONFIG.FREE_GAMES, credits:0, lastAd:0};
-try{ Object.assign(S, JSON.parse(localStorage.getItem(KEY)||"{}")); }catch(e){}
-function render(){ $('pts').textContent=S.points; $('free').textContent=S.freeLeft; }
-function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} render(); }
+/* Outside Telegram the server rejects requests, unless it runs with DEV=1 (local testing only). */
+function devId(){ try{ let d=localStorage.getItem('dev_id'); if(!d){ d=Math.random().toString(36).slice(2,10); localStorage.setItem('dev_id',d);} return d; }catch(e){ return 'x'; } }
+const INIT_DATA = (tg && tg.initData) ? tg.initData : 'dev:' + devId();
+
+/* ============ SERVER API (the server owns all rules) ============ */
+async function api(path, body){
+  try{
+    const r = await fetch(CONFIG.API_BASE + '/api/' + path, {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(Object.assign({initData: INIT_DATA}, body||{}))});
+    return await r.json();
+  }catch(e){ return {ok:false, error:'network'}; }
+}
+const ERR = {
+  network:'Connection problem. Please try again.', auth:'Please open this game from Telegram.',
+  no_games:'No games left. Watch an ad to play again.', cooldown:'An ad was already used this hour. Please wait.',
+  have_games:'You still have games left.', rate_limit:'Too many requests. Slow down a little.',
+  bad_timing:'The ad did not complete. Please try again.', bad_token:'The ad did not complete. Please try again.'
+};
+const errText = e => ERR[e] || 'Something went wrong. Please try again.';
+
+let S = null, adReadyAt = 0;               // S = state received from the server
+function applyState(st){ S = st; adReadyAt = Date.now() + st.adWaitMs; render(); }
+function render(){
+  if (!S) return;
+  $('pts').textContent = S.points;
+  $('free').textContent = S.freeLeft + S.credits;
+}
 function show(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on', s.id===id)); }
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
 /* ============ MUSIC ============ */
-let audio=null, muted=false, synthTimer=null, actx=null;
-let musicOn=false;
+let audio=null, muted=false, synthTimer=null, actx=null, musicOn=false;
 function startMusic(){
   musicOn=true;
   if (muted) return;
@@ -166,7 +181,7 @@ function startSynth(){
     o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime+.4);
   },450);
 }
-/* Music keeps playing from Start until the player leaves the game (pause only while the app is hidden) */
+/* Music plays from Start until the player leaves (it only pauses while the app is hidden) */
 document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopMusic(); else if(musicOn) startMusic(); });
 window.addEventListener('pagehide',stopMusic);
 function stopMusic(){ if(audio) audio.pause(); clearInterval(synthTimer); synthTimer=null; }
@@ -186,10 +201,9 @@ function clickSound(){
 }
 document.addEventListener('pointerdown',e=>{ const b=e.target.closest&&e.target.closest('button'); if(b&&!b.disabled) clickSound(); },true);
 
-/* ============ ADS ============ */
-const adWait = () => Math.max(0, S.lastAd + CONFIG.AD_COOLDOWN_MS - Date.now());
-/* Replace the body of this function with your real ad network (e.g. Adsgram). Return true when the ad was watched. */
-async function showRewardedAd(){
+/* ============ ADS (Adsgram Interstitial) ============ */
+/* Demo ad: used only if the Adsgram SDK is not available (e.g. opened in a normal browser) */
+async function showDemoAd(){
   $('adModal').classList.add('on'); $('adClose').style.display='none';
   for (let s=CONFIG.AD_SECONDS; s>0; s--){ $('adTimer').textContent="You can continue in "+s+"s"; await sleep(1000); }
   $('adTimer').textContent="Ad finished"; $('adClose').style.display='inline-block';
@@ -197,17 +211,43 @@ async function showRewardedAd(){
   $('adModal').classList.remove('on');
   return true;
 }
+/* show() resolves when the ad is watched or closed, and rejects on error / no ad available */
+let adController=null;
+function getAdController(){
+  if (adController) return adController;
+  try{ if (window.Adsgram) adController = window.Adsgram.init({ blockId: CONFIG.ADSGRAM_BLOCK_ID, debug: CONFIG.ADSGRAM_DEBUG }); }catch(e){ console.warn('Adsgram init failed', e); }
+  return adController;
+}
+async function showAd(){
+  const c = getAdController();
+  if (!c) return showDemoAd();
+  try{ await c.show(); return true; }
+  catch(res){ console.warn('Adsgram:', res); return false; }
+}
+
 function refreshHome(){
-  const canPlay = S.freeLeft>0 || S.credits>0, wait=adWait();
-  $('startBtn').disabled=!canPlay;
+  if (!S){ $('startBtn').disabled=true; $('adBtn').style.display='none'; return; }
+  const canPlay = S.freeLeft>0 || S.credits>0 || !!S.game;
+  const wait = Math.max(0, adReadyAt - Date.now());
+  $('startBtn').textContent = S.game ? 'Continue Game' : 'Start Game';
+  $('startBtn').disabled = !canPlay;
   $('adBtn').style.display = canPlay ? 'none' : 'inline-block';
   $('adBtn').disabled = wait>0;
-  $('homeNote').textContent = canPlay ? "" :
-    (wait>0 ? "No free games left. Next ad available in "+Math.ceil(wait/60000)+" min." : "No free games left. Watch an ad to play again.");
+  if (!$('homeNote').dataset.keep)
+    $('homeNote').textContent = canPlay ? "" :
+      (wait>0 ? "No games left. Next ad available in "+Math.ceil(wait/60000)+" min." : "No games left. Watch an ad to play again.");
 }
+function homeMessage(text){ const n=$('homeNote'); n.dataset.keep='1'; n.textContent=text; setTimeout(()=>{ delete n.dataset.keep; refreshHome(); },4000); }
+
 $('adBtn').onclick = async ()=>{
-  if (adWait()>0) return;
-  if (await showRewardedAd()){ S.credits++; S.lastAd=Date.now(); save(); }
+  $('adBtn').disabled = true;
+  const b = await api('ad/begin');                     // the server checks the 1-per-hour rule
+  if (!b.ok){ if(b.state) applyState(b.state); refreshHome(); homeMessage(errText(b.error)); return; }
+  const watched = await showAd();
+  if (!watched){ refreshHome(); homeMessage('No ad available right now. Please try again in a moment.'); return; }
+  const c = await api('ad/complete', {token:b.token}); // the server grants the extra game
+  if (c.state) applyState(c.state);
+  if (!c.ok) homeMessage(errText(c.error));
   refreshHome();
 };
 setInterval(()=>{ if($('home').classList.contains('on')) refreshHome(); }, 15000);
@@ -219,7 +259,7 @@ function cardEl(n, cls){ const d=document.createElement('div'); d.className='car
 function backEl(){ const d=document.createElement('div'); d.className='card back deal'; d.textContent='0'; return d; }
 function drawPips(){
   $('pips').innerHTML='';
-  for (let i=0;i<CONFIG.ROUNDS;i++){
+  for (let i=0;i<S.rounds;i++){
     const p=document.createElement('div');
     p.className='pip'+(results[i]===true?' w':results[i]===false?' l':i===round?' cur':'');
     $('pips').appendChild(p);
@@ -229,80 +269,76 @@ function clearTable(){
   $('playerRow').innerHTML=''; $('cpuRow').innerHTML=''; $('cpuRow').appendChild(backEl());
   $('msg').textContent=''; $('msg').className='';
 }
-
-function startGame(){
-  if (S.freeLeft>0) S.freeLeft--; else if (S.credits>0) S.credits--; else return;
-  save();
-  round=0; wins=0; results=[]; busy=false;
-  show('game'); startMusic();
-  clearTable(); drawPips();
-  setAction('Draw cards');
-}
-
-/* One button, one handler: it always plays the next round, so it can never get stuck. */
 function setAction(label){ $('actBtn').textContent=label; $('actBtn').disabled=false; }
+
+async function startGame(){
+  if (busy || !S) return; busy=true; $('startBtn').disabled=true;
+  const r = await api('start');                        // the server charges the free game / ad credit
+  busy=false;
+  if (!r.ok){ if(r.state) applyState(r.state); refreshHome(); homeMessage(errText(r.error)); return; }
+  applyState(r.state);
+  round=r.state.game.round; wins=r.state.game.wins; results=r.state.game.results.slice();
+  show('game'); startMusic(); clearTable(); drawPips();
+  setAction(round>0 ? 'Next round' : 'Draw cards');
+}
+$('startBtn').addEventListener('click', startGame);
 $('actBtn').addEventListener('click', ()=>{ if(!busy) playRound(); });
 
 async function playRound(){
   busy=true; $('actBtn').disabled=true;
   try{
     clearTable(); drawPips();
-
-    // player draws 3 different cards from 0-9
-    const pool=[0,1,2,3,4,5,6,7,8,9].sort(()=>Math.random()-.5);
-    const mine=pool.slice(0,3);
-    for (const n of mine){ $('playerRow').appendChild(cardEl(n,'deal')); await sleep(300); }
-
-    // computer reveals its card
+    const r = await api('round');                      // the server draws the cards and decides the result
+    if (!r.ok){
+      if (r.state) applyState(r.state);
+      if (r.error==='no_game'){ show('home'); refreshHome(); return; }
+      $('msg').textContent=errText(r.error); $('msg').className='l'; setAction('Try again'); return;
+    }
+    for (const n of r.mine){ $('playerRow').appendChild(cardEl(n,'deal')); await sleep(300); }
     await sleep(600);
-    const cpu=Math.floor(Math.random()*10);
-    $('cpuRow').innerHTML=''; $('cpuRow').appendChild(cardEl(cpu,'deal'));
+    $('cpuRow').innerHTML=''; $('cpuRow').appendChild(cardEl(r.cpu,'deal'));
     await sleep(700);
 
-    const hit=mine.indexOf(cpu);
-    if (hit>-1){
-      $('playerRow').children[hit].classList.add('match');
-      $('msg').textContent='Match! You win this round'; $('msg').className='w';
-      S.points+=CONFIG.PTS_ROUND_WIN; wins++; results[round]=true; haptic('success');
+    if (r.roundWon){
+      $('playerRow').children[r.hit].classList.add('match');
+      $('msg').textContent='Match! You win this round'; $('msg').className='w'; haptic('success');
     } else {
       $('msg').textContent='No match. You throw your cards away'; $('msg').className='l';
       [...$('playerRow').children].forEach((c,i)=>{ c.style.setProperty('--dx',(i-1)*70+'px'); c.style.setProperty('--rot',(i-1)*35+'deg'); c.classList.add('toss'); });
-      S.points+=CONFIG.PTS_ROUND_LOSS; results[round]=false; haptic('error');
+      haptic('error');
     }
-    save(); drawPips();
+    results=r.results; wins=r.wins; applyState(r.state); drawPips();
     await sleep(1400);
-    $('playerRow').innerHTML='';   // remove thrown cards so nothing covers the button
+    $('playerRow').innerHTML='';
+    round=r.round;
 
-    round++;
-    if (round>=CONFIG.ROUNDS){ finish(); }
+    if (r.finished){ finish(r); }
     else { drawPips(); setAction('Next round'); }
   } catch(err){
-    console.error(err); setAction('Try again');   // never leave the button locked
+    console.error(err); setAction('Try again');       // never leave the button locked
   } finally {
     busy=false;
   }
 }
 
-function finish(){
-  const won = wins>=CONFIG.WIN_NEEDED;
-  if (won){ S.points+=CONFIG.PTS_MATCH_BONUS; haptic('success'); }
-  save();
-  $('endTitle').textContent = won ? 'You win!' : 'You lost this game';
-  $('endScore').textContent = wins+' / '+CONFIG.ROUNDS;
-  $('endDetail').textContent = (won ? 'Bonus +'+CONFIG.PTS_MATCH_BONUS+' points. ' : '') + 'Total: '+S.points+' points';
+function finish(r){
+  $('endTitle').textContent = r.won ? 'You win!' : 'You lost this game';
+  $('endScore').textContent = r.wins+' / '+S.rounds;
+  $('endDetail').textContent = (r.won ? 'Bonus +'+r.bonus+' points. ' : '') + 'Total: '+S.points+' points';
   $('endNote').textContent = (S.freeLeft>0||S.credits>0) ? '' : 'No games left. Watch an ad to play again.';
-  show('end'); sendScore(won);
+  show('end');
 }
 $('againBtn').onclick=()=>{ show('home'); refreshHome(); };
-$('startBtn').addEventListener('click', startGame);
 
-function sendScore(won){
-  if (!CONFIG.SERVER_URL) return;
-  fetch(CONFIG.SERVER_URL,{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({initData: tg?tg.initData:'', points:S.points, won})}).catch(()=>{});
-}
-
-render(); refreshHome();
+/* ============ BOOT ============ */
+(async ()=>{
+  refreshHome();
+  $('homeNote').textContent='Connecting…';
+  const r = await api('state');
+  $('homeNote').textContent='';
+  if (r.ok){ applyState(r.state); refreshHome(); }
+  else homeMessage(errText(r.error));
+})();
 </script>
 </body>
 </html>
