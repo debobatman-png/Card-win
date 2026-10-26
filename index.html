@@ -74,7 +74,7 @@ main{flex:1;padding:8px 16px 16px;display:flex;flex-direction:column}
     <section class="screen on" id="home">
       <div class="hello" id="hello"></div>
       <h1>Card<br>Duel</h1>
-      <p>Draw 3 cards. If one matches the computer's card, you win the round. Win 3 out of 5 rounds to win the game.</p>
+      <p>Draw 3 cards. If one matches the computer's card, you win the round. Win 5 out of 9 rounds to win the game.</p>
       <button class="btn" id="startBtn">Start Game</button>
       <div class="note" id="homeNote"></div>
       <button class="btn alt" id="adBtn" style="display:none;font-size:16px;padding:11px 22px">Watch an ad to play again</button>
@@ -115,12 +115,12 @@ main{flex:1;padding:8px 16px 16px;display:flex;flex-direction:column}
 <script>
 /* ============ SETTINGS ============ */
 const CONFIG = {
-  FREE_GAMES: 3,
+  FREE_GAMES: 999,
   AD_COOLDOWN_MS: 60*60*1000,   // 1 ad per hour
   AD_SECONDS: 5,
   ROUNDS: 9, WIN_NEEDED: 5,
   PTS_ROUND_WIN: 5, PTS_ROUND_LOSS: 2, PTS_MATCH_BONUS: 50,
-  MUSIC_URL: "music.mp3",       // <<< PUT YOUR SONG FILE/URL HERE
+  MUSIC_URL: "https://res.cloudinary.com/yyfutxow/video/upload/v1792959904/your_love.mp3",       // <<< PUT YOUR SONG FILE/URL HERE
   SERVER_URL: ""                // optional: your server endpoint to save scores
 };
 
