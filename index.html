@@ -226,7 +226,7 @@ async function showAd(){
 }
 
 function refreshHome(){
-  if (!S){ $('startBtn').disabled=true; $('adBtn').style.display='none'; return; }
+  if (!S){ $('startBtn').disabled=false; $('adBtn').style.display='none'; return; }
   const canPlay = S.freeLeft>0 || S.credits>0 || !!S.game;
   const wait = Math.max(0, adReadyAt - Date.now());
   $('startBtn').textContent = S.game ? 'Continue Game' : 'Start Game';
